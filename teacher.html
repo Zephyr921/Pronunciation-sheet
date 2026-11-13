@@ -225,7 +225,7 @@ addEventListener("beforeprint",()=>{printing=true;rows.forEach(renderTrans)});
 addEventListener("afterprint",()=>{printing=false;rows.forEach(renderTrans)});
 for(let i=0;i<10;i++)addRow();
 update();
-const CODE="teacher2026"; // <- change the access code here
+const CODE="2026"; // <- change the access code here
 function unlock(){$("gate").style.display="none";$("app").style.display="block";try{sessionStorage.setItem("ok","1")}catch(e){}}
 function tryCode(){if($("code").value.trim()===CODE)unlock();else $("gerr").textContent="Incorrect code"}
 $("gobtn").onclick=tryCode;$("code").addEventListener("keydown",e=>{if(e.key==="Enter")tryCode()});
