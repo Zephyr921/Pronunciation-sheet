@@ -37,14 +37,15 @@ h2.w{font-size:30px;margin:0 0 2px}.wes{color:var(--acc);font-size:17px;margin-b
 .ipa{font-family:"Segoe UI","Noto Sans","DejaVu Sans",sans-serif;font-size:22px}.simple{color:var(--acc);font-weight:700;font-size:20px;letter-spacing:.4px}
 .lab{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.6px;margin:14px 0 6px}
 .m{padding:10px 0;border-top:1px solid var(--line)}.pos{color:var(--acc);font-style:italic;margin-right:6px}
+.lnk{background:none;border:0;color:var(--acc);cursor:pointer;padding:0;font:inherit;font-size:13px;margin-top:4px}.ex{color:var(--mute);font-style:italic;margin-top:4px}.es2{color:var(--acc);margin-top:2px}.exs{margin-top:8px}
 .esw{color:var(--text);font-size:17px;font-weight:600;margin-top:2px}.note{color:var(--mute);font-size:12px;margin-top:18px}
 @media(max-width:640px){.info{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
 <header><h1>Word Lookup</h1><div class="logo"><i>◐</i>planetenglish</div></header>
-<div class="sb"><input id="q" placeholder="Type an English word…" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn pri" id="go">Search</button></div>
+<div class="sb"><input id="q" placeholder="Type an English word or phrasal verb…" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn pri" id="go">Search</button></div>
 <div class="chips" id="recent"></div>
 <div class="card" id="out"><span class="hint">Type a word to see how it is pronounced, what it means, and its Spanish translation.</span></div>
-<p class="note">Meanings and Spanish translations come from Wiktionary, a community dictionary.</p>
+<p class="note">Meanings and Spanish translations come from Wiktionary; example sentences from Wiktionary and Tatoeba (community projects).</p>
 </div>
 <script>
 const $=id=>document.getElementById(id);
@@ -103,13 +104,19 @@ async function lookup(w){
 
 function txt(h){return new DOMParser().parseFromString(h,"text/html").body.textContent.trim()}
 async function defs(w){
- const r=await fetch("https://en.wiktionary.org/api/rest_v1/page/definition/"+encodeURIComponent(w));
+ const ph=w.includes(" ");
+ const r=await fetch("https://en.wiktionary.org/api/rest_v1/page/definition/"+encodeURIComponent(w.replace(/ /g,"_")));
  if(!r.ok)throw 0;const j=await r.json();const o=[];
- (j.en||[]).forEach(e=>(e.definitions||[]).slice(0,2).forEach(x=>{const t=txt(x.definition);if(t)o.push({pos:e.partOfSpeech,t})}));
- if(!o.length)throw 0;return o.slice(0,5);
+ (j.en||[]).forEach(e=>(e.definitions||[]).slice(0,ph?4:2).forEach(x=>{
+  const t=txt(x.definition);if(!t)return;
+  const raw=(x.parsedExamples&&x.parsedExamples.length)?x.parsedExamples.map(q=>q.example||""):(x.examples||[]);
+  const ex=raw.map(txt).filter(z=>z&&z.length<220).slice(0,2);
+  o.push({pos:e.partOfSpeech,t,ex});
+ }));
+ if(!o.length)throw 0;return o.slice(0,ph?6:5);
 }
 async function trans(w){
- const r=await fetch("https://en.wiktionary.org/w/api.php?action=parse&page="+encodeURIComponent(w)+"&prop=wikitext&format=json&formatversion=2&origin=*");
+ const r=await fetch("https://en.wiktionary.org/w/api.php?action=parse&page="+encodeURIComponent(w.replace(/ /g,"_"))+"&prop=wikitext&format=json&formatversion=2&origin=*");
  const j=await r.json();const t=j.parse&&j.parse.wikitext;if(!t)throw 0;
  const m=t.match(/(?:^|\n)==English==[\s\S]*?(?=\n==[^=]|$)/);if(!m)throw 0;
  const out=[],re=/\{\{trans-top\|([^\n]*?)\}\}([\s\S]*?)\{\{trans-bottom\}\}/g;let b;
@@ -120,6 +127,22 @@ async function trans(w){
   if(ws.length)out.push({g,w:[...new Set(ws)]});
  }
  if(!out.length)throw 0;return out;
+}
+function lookupP(w){const a=w.split(" ");if(a.length==1)return lookup(w);
+ return Promise.all(a.map(lookup)).then(r=>({ipa:r.map(x=>x.ipa).join(" "),simple:r.map(x=>x.simple).join(" ")}))}
+const PART=new Set("up down in out on off over by along around away back through into across after apart ahead aside forward together under with about at for to against behind between past round without within onto from".split(" "));
+const P3=new Set("with to up on for of out in about".split(" "));
+async function phr(w){
+ const r=await fetch("https://en.wiktionary.org/w/api.php?action=query&list=allpages&apprefix="+encodeURIComponent(w+"_")+"&aplimit=500&apnamespace=0&format=json&formatversion=2&origin=*");
+ const j=await r.json();
+ const o=j.query.allpages.map(p=>p.title).filter(t=>{const a=t.split(" ");return a[0]===w&&a.length>=2&&a.length<=3&&PART.has(a[1])&&(a.length==2||P3.has(a[2]))});
+ if(!o.length)throw 0;return o.slice(0,30);
+}
+async function exs(w){
+ const r=await fetch("https://tatoeba.org/en/api_v0/search?from=eng&to=spa&trans_filter=limit&trans_to=spa&sort=relevance&query="+encodeURIComponent(w.includes(" ")?'"'+w+'"':w));
+ const j=await r.json();const o=[];
+ (j.results||[]).forEach(z=>{const t=(z.translations||[]).flat().find(x=>x.lang==="spa");if(t&&o.length<5)o.push({e:z.text,s:t.text})});
+ if(!o.length)throw 0;return o;
 }
 let tok=0;
 function getR(){try{return JSON.parse(localStorage.getItem("recent")||"[]")}catch(e){return[]}}
@@ -132,11 +155,12 @@ function showR(){
 }
 function el(t,c,x){const e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e}
 async function search(){
- const w=$("q").value.trim().toLowerCase(),out=$("out"),my=++tok;
+ const w=$("q").value.trim().toLowerCase().replace(/\s+/g," "),out=$("out"),my=++tok;
  if(!w)return;
- if(!/^[a-z][a-z'\-]*$/.test(w)){out.innerHTML='<span class="hint">Please type one English word.</span>';return}
+ if(!/^[a-z][a-z'\-]*( [a-z][a-z'\-]*){0,3}$/.test(w)){out.innerHTML='<span class="hint">Please type an English word or phrasal verb (up to 4 words).</span>';return}
  out.innerHTML='<span class="hint">Searching…</span>';
- const [p,d,t]=await Promise.all([lookup(w).catch(()=>null),defs(w).catch(()=>null),trans(w).catch(()=>null)]);
+ const one=!w.includes(" ");
+ const [p,d,t,pv]=await Promise.all([lookupP(w).catch(()=>null),defs(w).catch(()=>null),trans(w).catch(()=>null),one?phr(w).catch(()=>null):null]);
  if(my!==tok)return;
  out.innerHTML="";
  out.appendChild(el("h2","w",w));
@@ -145,14 +169,27 @@ async function search(){
  else out.appendChild(el("div","hint","Pronunciation not found — check the spelling."));
  if(d){
   out.appendChild(el("div","lab","Meanings (English)"));
-  d.forEach(x=>{const m=el("div","m");m.appendChild(el("span","pos",x.pos));m.appendChild(document.createTextNode(x.t));out.appendChild(m)});
+  d.forEach(x=>{const m=el("div","m");m.appendChild(el("span","pos",x.pos));m.appendChild(document.createTextNode(x.t));
+   if(x.ex.length){const b=el("button","lnk","Show example"),e=el("div","ex");e.style.display="none";x.ex.forEach(z=>e.appendChild(el("div","",z)));
+    b.onclick=()=>{const sh=e.style.display==="none";e.style.display=sh?"block":"none";b.textContent=sh?"Hide example":"Show example"};
+    m.appendChild(document.createElement("br"));m.appendChild(b);m.appendChild(e)}
+   out.appendChild(m)});
  }
  if(t){
   out.appendChild(el("div","lab","En español"));
   t.slice(0,6).forEach(x=>{const m=el("div","m");if(x.g)m.appendChild(el("div","hint",x.g));m.appendChild(el("div","esw",x.w.join(", ")));out.appendChild(m)});
  }
  if(!d&&!t&&p)out.appendChild(el("div","hint","Meanings are not available for this word."));
- if(!p&&!d&&!t){out.innerHTML='<span class="hint">Word not found. Check the spelling.</span>';return}
+ if(!p&&!d&&!t&&!pv){out.innerHTML='<span class="hint">Not found. Check the spelling.</span>';return}
+ if(pv){
+  out.appendChild(el("div","lab","Phrasal verbs with “"+w+"”"));
+  const c=el("div","chips");pv.forEach(v=>{const b=el("button","chip",v);b.onclick=()=>{$("q").value=v;search()};c.appendChild(b)});out.appendChild(c);
+ }
+ const xb=el("button","chip","More example sentences"),xo=el("div","exs");
+ xb.onclick=async()=>{xb.disabled=true;xb.textContent="Loading…";
+  try{const a=await exs(w);if(my!==tok)return;a.forEach(z=>{const m=el("div","m");m.appendChild(el("div","",z.e));m.appendChild(el("div","es2",z.s));xo.appendChild(m)});xb.remove()}
+  catch(e){xb.disabled=false;xb.textContent="More example sentences";xo.innerHTML='<span class="hint">Examples are not available right now.</span>'}};
+ out.appendChild(xb);out.appendChild(xo);
  const a=getR().filter(x=>x!==w);a.unshift(w);setR(a.slice(0,10));showR();
 }
 $("go").onclick=search;
