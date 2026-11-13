@@ -37,14 +37,14 @@ h2.w{font-size:30px;margin:0 0 2px}.wes{color:var(--acc);font-size:17px;margin-b
 .ipa{font-family:"Segoe UI","Noto Sans","DejaVu Sans",sans-serif;font-size:22px}.simple{color:var(--acc);font-weight:700;font-size:20px;letter-spacing:.4px}
 .lab{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.6px;margin:14px 0 6px}
 .m{padding:10px 0;border-top:1px solid var(--line)}.pos{color:var(--acc);font-style:italic;margin-right:6px}
-.es{color:var(--mute);margin-top:4px}.note{color:var(--mute);font-size:12px;margin-top:18px}
+.esw{color:var(--text);font-size:17px;font-weight:600;margin-top:2px}.note{color:var(--mute);font-size:12px;margin-top:18px}
 @media(max-width:640px){.info{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
 <header><h1>Word Lookup</h1><div class="logo"><i>◐</i>planetenglish</div></header>
 <div class="sb"><input id="q" placeholder="Type an English word…" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn pri" id="go">Search</button></div>
 <div class="chips" id="recent"></div>
 <div class="card" id="out"><span class="hint">Type a word to see how it is pronounced, what it means, and its Spanish translation.</span></div>
-<p class="note">Spanish is an automatic translation and may not always be perfect.</p>
+<p class="note">Meanings and Spanish translations come from Wiktionary, a community dictionary.</p>
 </div>
 <script>
 const $=id=>document.getElementById(id);
@@ -101,15 +101,25 @@ async function lookup(w){
  return{ipa,simple:simplify(ipa)};
 }
 
+function txt(h){return new DOMParser().parseFromString(h,"text/html").body.textContent.trim()}
 async function defs(w){
- const r=await fetch("https://api.dictionaryapi.dev/v2/entries/en/"+encodeURIComponent(w));
- if(!r.ok)throw 0;const d=await r.json();const o=[];
- d.forEach(e=>(e.meanings||[]).forEach(m=>(m.definitions||[]).slice(0,2).forEach(x=>o.push({pos:m.partOfSpeech,t:x.definition}))));
- if(!o.length)throw 0;return o.slice(0,4);
+ const r=await fetch("https://en.wiktionary.org/api/rest_v1/page/definition/"+encodeURIComponent(w));
+ if(!r.ok)throw 0;const j=await r.json();const o=[];
+ (j.en||[]).forEach(e=>(e.definitions||[]).slice(0,2).forEach(x=>{const t=txt(x.definition);if(t)o.push({pos:e.partOfSpeech,t})}));
+ if(!o.length)throw 0;return o.slice(0,5);
 }
-async function es(t){
- const r=await fetch("https://api.mymemory.translated.net/get?q="+encodeURIComponent(t)+"&langpair=en|es");
- const j=await r.json();if(j.responseStatus!=200)throw 0;return j.responseData.translatedText;
+async function trans(w){
+ const r=await fetch("https://en.wiktionary.org/w/api.php?action=parse&page="+encodeURIComponent(w)+"&prop=wikitext&format=json&formatversion=2&origin=*");
+ const j=await r.json();const t=j.parse&&j.parse.wikitext;if(!t)throw 0;
+ const m=t.match(/(?:^|\n)==English==[\s\S]*?(?=\n==[^=]|$)/);if(!m)throw 0;
+ const out=[],re=/\{\{trans-top\|([^\n]*?)\}\}([\s\S]*?)\{\{trans-bottom\}\}/g;let b;
+ while((b=re.exec(m[0]))){
+  const raw=b[1].replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g,"$1").split("|").filter(x=>!/^\w+=/.test(x));
+  const g=(raw[0]||"").replace(/\{\{[^}]*\}\}/g,"").replace(/'{2,3}/g,"").trim();
+  const ws=[...b[2].matchAll(/\{\{tt?\+?\|es\|([^|}]+)/g)].map(x=>x[1].trim());
+  if(ws.length)out.push({g,w:[...new Set(ws)]});
+ }
+ if(!out.length)throw 0;return out;
 }
 let tok=0;
 function getR(){try{return JSON.parse(localStorage.getItem("recent")||"[]")}catch(e){return[]}}
@@ -126,19 +136,24 @@ async function search(){
  if(!w)return;
  if(!/^[a-z][a-z'\-]*$/.test(w)){out.innerHTML='<span class="hint">Please type one English word.</span>';return}
  out.innerHTML='<span class="hint">Searching…</span>';
- const P=lookup(w).catch(()=>null),D=defs(w).catch(()=>null),E=es(w).catch(()=>null);
- const [p,d]=await Promise.all([P,D]);if(my!==tok)return;
+ const [p,d,t]=await Promise.all([lookup(w).catch(()=>null),defs(w).catch(()=>null),trans(w).catch(()=>null)]);
+ if(my!==tok)return;
  out.innerHTML="";
- const h=el("h2","w",w);out.appendChild(h);
- const wes=el("div","wes","");out.appendChild(wes);E.then(t=>{if(my===tok&&t)wes.textContent="🇪🇸 "+t});
+ out.appendChild(el("h2","w",w));
+ if(t){const all=[...new Set(t.flatMap(x=>x.w))].slice(0,4);out.appendChild(el("div","wes","Español: "+all.join(", ")))}
  if(p){const b=el("div","pl");b.appendChild(el("span","ipa","/"+p.ipa+"/"));b.appendChild(el("span","simple",p.simple));out.appendChild(b)}
  else out.appendChild(el("div","hint","Pronunciation not found — check the spelling."));
  if(d){
-  out.appendChild(el("div","lab","Meanings"));
-  d.forEach(x=>{const m=el("div","m"),l=el("div");l.appendChild(el("span","pos",x.pos));l.appendChild(document.createTextNode(x.t));m.appendChild(l);
-   const s=el("div","es","");m.appendChild(s);es(x.t).then(t=>{if(my===tok&&t)s.textContent="🇪🇸 "+t}).catch(()=>{});out.appendChild(m)});
- }else if(p)out.appendChild(el("div","hint","Definitions are not available for this word."));
- if(p||d){const a=getR().filter(x=>x!==w);a.unshift(w);setR(a.slice(0,10));showR()}
+  out.appendChild(el("div","lab","Meanings (English)"));
+  d.forEach(x=>{const m=el("div","m");m.appendChild(el("span","pos",x.pos));m.appendChild(document.createTextNode(x.t));out.appendChild(m)});
+ }
+ if(t){
+  out.appendChild(el("div","lab","En español"));
+  t.slice(0,6).forEach(x=>{const m=el("div","m");if(x.g)m.appendChild(el("div","hint",x.g));m.appendChild(el("div","esw",x.w.join(", ")));out.appendChild(m)});
+ }
+ if(!d&&!t&&p)out.appendChild(el("div","hint","Meanings are not available for this word."));
+ if(!p&&!d&&!t){out.innerHTML='<span class="hint">Word not found. Check the spelling.</span>';return}
+ const a=getR().filter(x=>x!==w);a.unshift(w);setR(a.slice(0,10));showR();
 }
 $("go").onclick=search;
 $("q").addEventListener("keydown",e=>{if(e.key==="Enter")search()});
