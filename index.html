@@ -45,7 +45,7 @@ h2.w{font-size:30px;margin:0 0 2px}.wes{color:var(--acc);font-size:17px;margin-b
 <div class="sb"><input id="q" placeholder="Type an English word or phrasal verb…" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn pri" id="go">Search</button></div>
 <div class="chips" id="recent"></div>
 <div class="card" id="out"><span class="hint">Type a word to see how it is pronounced, what it means, and its Spanish translation.</span></div>
-<p class="note">Meanings and Spanish translations come from Wiktionary; example sentences from Wiktionary and Tatoeba (community projects).</p>
+<p class="note">Meanings and Spanish translations come from Wiktionary; example sentences from Wiktionary (a community project).</p>
 </div>
 <script>
 const $=id=>document.getElementById(id);
@@ -115,12 +115,13 @@ async function defs(w){
  }));
  if(!o.length)throw 0;return o.slice(0,ph?6:5);
 }
+const WTc={};
+function getWT(w){return WTc[w]||(WTc[w]=fetch("https://en.wiktionary.org/w/api.php?action=parse&page="+encodeURIComponent(w.replace(/ /g,"_"))+"&prop=wikitext&format=json&formatversion=2&origin=*")
+ .then(r=>r.json()).then(j=>{const t=j.parse&&j.parse.wikitext;if(!t)throw 0;const m=t.match(/(?:^|\n)==English==[\s\S]*?(?=\n==[^=]|$)/);if(!m)throw 0;return m[0]}))}
 async function trans(w){
- const r=await fetch("https://en.wiktionary.org/w/api.php?action=parse&page="+encodeURIComponent(w.replace(/ /g,"_"))+"&prop=wikitext&format=json&formatversion=2&origin=*");
- const j=await r.json();const t=j.parse&&j.parse.wikitext;if(!t)throw 0;
- const m=t.match(/(?:^|\n)==English==[\s\S]*?(?=\n==[^=]|$)/);if(!m)throw 0;
+ const sec=await getWT(w);
  const out=[],re=/\{\{trans-top\|([^\n]*?)\}\}([\s\S]*?)\{\{trans-bottom\}\}/g;let b;
- while((b=re.exec(m[0]))){
+ while((b=re.exec(sec))){
   const raw=b[1].replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g,"$1").split("|").filter(x=>!/^\w+=/.test(x));
   const g=(raw[0]||"").replace(/\{\{[^}]*\}\}/g,"").replace(/'{2,3}/g,"").trim();
   const ws=[...b[2].matchAll(/\{\{tt?\+?\|es\|([^|}]+)/g)].map(x=>x[1].trim());
@@ -138,10 +139,16 @@ async function phr(w){
  const o=j.query.allpages.map(p=>p.title).filter(t=>{const a=t.split(" ");return a[0]===w&&a.length>=2&&a.length<=3&&PART.has(a[1])&&(a.length==2||P3.has(a[2]))});
  if(!o.length)throw 0;return o.slice(0,30);
 }
-async function exs(w){
- const r=await fetch("https://tatoeba.org/en/api_v0/search?from=eng&to=spa&trans_filter=limit&trans_to=spa&sort=relevance&query="+encodeURIComponent(w.includes(" ")?'"'+w+'"':w));
- const j=await r.json();const o=[];
- (j.results||[]).forEach(z=>{const t=(z.translations||[]).flat().find(x=>x.lang==="spa");if(t&&o.length<5)o.push({e:z.text,s:t.text})});
+async function exs(w,d){
+ const sec=await getWT(w),seen=new Set((d||[]).flatMap(x=>x.ex)),o=[];
+ const clean=sec.replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g,"$1").replace(/\{\{(?:m|l|link|mention)\|en\|([^|}]*)(?:\|[^}]*)?\}\}/g,"$1");
+ clean.split("\n").forEach(l=>{
+  if(!/^#+:(?!\*)/.test(l))return;
+  let t;const m=l.match(/\{\{(?:ux|uxi|usex|usex-inline)\|en\|([^|}]*)/);
+  if(m)t=m[1];else if(!l.includes("{{"))t=l.replace(/^#+:\s*/,"");
+  if(!t)return;t=t.replace(/'{2,3}/g,"").replace(/<[^>]+>/g,"").trim();
+  if(t.length>8&&t.length<200&&!seen.has(t)&&!o.includes(t)&&o.length<8)o.push(t);
+ });
  if(!o.length)throw 0;return o;
 }
 let tok=0;
@@ -187,8 +194,8 @@ async function search(){
  }
  const xb=el("button","chip","More example sentences"),xo=el("div","exs");
  xb.onclick=async()=>{xb.disabled=true;xb.textContent="Loading…";
-  try{const a=await exs(w);if(my!==tok)return;a.forEach(z=>{const m=el("div","m");m.appendChild(el("div","",z.e));m.appendChild(el("div","es2",z.s));xo.appendChild(m)});xb.remove()}
-  catch(e){xb.disabled=false;xb.textContent="More example sentences";xo.innerHTML='<span class="hint">Examples are not available right now.</span>'}};
+  try{const a=await exs(w,d);if(my!==tok)return;a.forEach(z=>{const m=el("div","m");m.appendChild(el("div","",z));xo.appendChild(m)});xb.remove()}
+  catch(e){xb.disabled=false;xb.textContent="More example sentences";xo.innerHTML='<span class="hint">No more examples found for this word.</span>'}};
  out.appendChild(xb);out.appendChild(xo);
  const a=getR().filter(x=>x!==w);a.unshift(w);setR(a.slice(0,10));showR();
 }
