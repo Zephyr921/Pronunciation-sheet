@@ -103,7 +103,7 @@ async function lookup(w){
 }
 
 function txt(h){return new DOMParser().parseFromString(h,"text/html").body.textContent.trim()}
-async function defs(w){
+async function defsRest(w){
  const ph=w.includes(" ");
  const r=await fetch("https://en.wiktionary.org/api/rest_v1/page/definition/"+encodeURIComponent(w.replace(/ /g,"_")));
  if(!r.ok)throw 0;const j=await r.json();const o=[];
@@ -139,15 +139,56 @@ async function phr(w){
  const o=j.query.allpages.map(p=>p.title).filter(t=>{const a=t.split(" ");return a[0]===w&&a.length>=2&&a.length<=3&&PART.has(a[1])&&(a.length==2||P3.has(a[2]))});
  if(!o.length)throw 0;return o.slice(0,30);
 }
+function tp(x){
+ const a=x.split("|").map(z=>z.trim()),n=a[0].toLowerCase(),r=a.slice(1).filter(z=>z&&!/^\w+=/.test(z));
+ if(["lb","lbl","label","lb-lite"].includes(n)){const q=r.slice(1).filter(z=>z!=="_");return q.length?"("+q.join(", ")+")":""}
+ if(n==="w")return r[1]||r[0]||"";
+ if(["l","m","link","mention","ll","m-self","l-self"].includes(n))return r[2]||r[1]||"";
+ if(["gloss","gl"].includes(n))return r[0]?"("+r[0]+")":"";
+ if(["n-g","ng","non-gloss","non-gloss definition"].includes(n))return r[0]||"";
+ if(["q","qual","qualifier","i","qf"].includes(n))return r.length?"("+r.join(", ")+")":"";
+ if(/ of$/.test(n)&&r[1])return n.replace("inflection","form")+" "+r[1];
+ return "";
+}
+function cl(t){
+ t=t.replace(/<ref[\s\S]*?(<\/ref>|\/>)/g,"").replace(/<[^>]+>/g,"").replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g,"$1");
+ for(let i=0;i<6&&/\{\{[^{}]*\}\}/.test(t);i++)t=t.replace(/\{\{([^{}]*)\}\}/g,(m,x)=>tp(x));
+ return t.replace(/'{2,3}/g,"").replace(/\s+/g," ").replace(/\s+([,.;:])/g,"$1").trim();
+}
+function exLine(l){
+ if(!/^#+:(?!\*)/.test(l))return null;
+ const u=l.replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g,"$1").replace(/\{\{(?:m|l|link|mention)\|en\|([^|}]*)(?:\|[^}]*)?\}\}/g,"$1");
+ const m=u.match(/\{\{(?:ux|uxi|usex|usex-inline)\|en\|([^|}]*)/);
+ let e=m?m[1]:(!u.includes("{{")?u.replace(/^#+:\s*/,""):null);
+ if(!e)return null;e=e.replace(/'{2,3}/g,"").replace(/<[^>]+>/g,"").trim();
+ return e.length>8&&e.length<220?e:null;
+}
+const POS=new Set("noun verb adjective adverb pronoun preposition conjunction interjection determiner numeral particle phrase proverb article contraction".split(" ").concat(["proper noun"]));
+function parseDefs(sec,ph){
+ const out=[],cnt={};let pos=null,cur=null;
+ sec.split("\n").forEach(l=>{
+  const h=l.match(/^={3,5}\s*([^=]+?)\s*={3,5}\s*$/);
+  if(h){pos=POS.has(h[1].toLowerCase())?h[1]:null;cur=null;return}
+  if(!pos)return;
+  if(/^# /.test(l)){
+   const t=cl(l.slice(2));cur=null;
+   if(t.length>2&&(cnt[pos]||0)<(ph?4:3)){cnt[pos]=(cnt[pos]||0)+1;cur={pos,t,ex:[]};out.push(cur)}
+   return;
+  }
+  if(cur&&cur.ex.length<2){const e=exLine(l);if(e)cur.ex.push(e)}
+ });
+ return out;
+}
+async function defs(w){
+ const ph=w.includes(" ");let o=[];
+ try{o=parseDefs(await getWT(w),ph)}catch(e){}
+ if(o.length)return o.slice(0,ph?6:6);
+ return defsRest(w);
+}
 async function exs(w,d){
  const sec=await getWT(w),seen=new Set((d||[]).flatMap(x=>x.ex)),o=[];
- const clean=sec.replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g,"$1").replace(/\{\{(?:m|l|link|mention)\|en\|([^|}]*)(?:\|[^}]*)?\}\}/g,"$1");
- clean.split("\n").forEach(l=>{
-  if(!/^#+:(?!\*)/.test(l))return;
-  let t;const m=l.match(/\{\{(?:ux|uxi|usex|usex-inline)\|en\|([^|}]*)/);
-  if(m)t=m[1];else if(!l.includes("{{"))t=l.replace(/^#+:\s*/,"");
-  if(!t)return;t=t.replace(/'{2,3}/g,"").replace(/<[^>]+>/g,"").trim();
-  if(t.length>8&&t.length<200&&!seen.has(t)&&!o.includes(t)&&o.length<8)o.push(t);
+ sec.replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g,"$1").split("\n").forEach(l=>{
+  const t=exLine(l);if(t&&!seen.has(t)&&!o.includes(t)&&o.length<8)o.push(t);
  });
  if(!o.length)throw 0;return o;
 }
